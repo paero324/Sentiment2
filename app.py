@@ -1,17 +1,14 @@
 import streamlit as st
-import os
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
-import plotly.express as px
-from datetime import datetime
+import matplotlib.pyplot as plt
+import seaborn as sns
+from wordcloud import WordCloud
+from collections import Counter
 import nltk
 from nltk.tokenize import RegexpTokenizer
 from nltk.corpus import stopwords
 from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
-from wordcloud import WordCloud
-import matplotlib.pyplot as plt
-from collections import Counter
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
@@ -27,9 +24,28 @@ from openpyxl import Workbook
 from openpyxl.drawing.image import Image
 from openpyxl.chart import BarChart, Reference
 import tempfile
-import seaborn as sns
 from PIL import Image as PILImage
 import base64
+from datetime import datetime
+
+# Try to import plotly with error handling
+try:
+    import plotly.graph_objects as go
+    import plotly.express as px
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    st.error("""
+    ⚠️ **Missing Required Library**
+    
+    The `plotly` library is required for this application. Please install it by running:
+    
+    ```bash
+    pip install plotly
+    ```
+    
+    Or add it to your `requirements.txt` file.
+    """)
 
 # Download required NLTK data
 nltk_data_dir = "./resources/nltk_data_dir/"
@@ -39,8 +55,8 @@ if not os.path.exists(nltk_data_dir):
 nltk.data.path.clear()
 nltk.data.path.append(nltk_data_dir)
 try:
-    nltk.download("stopwords", download_dir=nltk_data_dir)
-    nltk.download("punkt", download_dir=nltk_data_dir)
+    nltk.download("stopwords", download_dir=nltk_data_dir, quiet=True)
+    nltk.download("punkt", download_dir=nltk_data_dir, quiet=True)
 except:
     st.warning("Could not download NLTK data. Using existing data if available.")
 
@@ -82,6 +98,20 @@ def preprocess_text(text):
 
 def create_sentiment_gauge(score):
     """Create a gauge chart for sentiment visualization."""
+    if not PLOTLY_AVAILABLE:
+        # Fallback to matplotlib if plotly is not available
+        fig, ax = plt.subplots(figsize=(6, 3))
+        colors = ['#FF4B4B', '#FFA500', '#00FF00']
+        color_idx = 0 if score <= 0.33 else (1 if score <= 0.66 else 2)
+        
+        # Create a simple bar chart as fallback
+        ax.barh(0, score, color=colors[color_idx], height=0.5)
+        ax.set_xlim(0, 1)
+        ax.set_yticks([])
+        ax.set_title(f'Sentiment Score: {score:.2f}')
+        ax.text(score + 0.02, 0, f'{score:.2f}', va='center')
+        return fig
+    
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=score,
@@ -405,6 +435,17 @@ def img_to_bytes(img_path):
         plt.close()
         return placeholder.getvalue()
 
+def create_matplotlib_bar_chart(data, title, x_label, y_label, color='blue'):
+    """Create a bar chart using matplotlib as fallback."""
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.bar(data.index, data.values, color=color)
+    ax.set_title(title)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    return fig
+
 # Page configuration
 st.set_page_config(
     page_title="Enhanced Sentiment Analysis",
@@ -566,7 +607,10 @@ with tab1:
                         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
                         st.subheader("Confidence Gauge")
                         gauge_chart = create_sentiment_gauge(analysis_result['confidence'])
-                        st.plotly_chart(gauge_chart, use_container_width=True)
+                        if PLOTLY_AVAILABLE:
+                            st.plotly_chart(gauge_chart, use_container_width=True)
+                        else:
+                            st.pyplot(gauge_chart)
                         st.markdown('</div>', unsafe_allow_html=True)
                     
                     with col4:
@@ -580,10 +624,22 @@ with tab1:
                     if st.session_state.sentiment_history:
                         st.subheader("Analysis History")
                         history_df = pd.DataFrame(st.session_state.sentiment_history)
-                        fig = px.line(history_df, x='timestamp', y='confidence',
-                                        title="Confidence History",
-                                        labels={'confidence': 'Confidence Score', 'timestamp': 'Time'})
-                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        if PLOTLY_AVAILABLE:
+                            fig = px.line(history_df, x='timestamp', y='confidence',
+                                            title="Confidence History",
+                                            labels={'confidence': 'Confidence Score', 'timestamp': 'Time'})
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            # Fallback to matplotlib
+                            fig, ax = plt.subplots(figsize=(10, 5))
+                            ax.plot(history_df['timestamp'], history_df['confidence'], marker='o')
+                            ax.set_title("Confidence History")
+                            ax.set_xlabel("Time")
+                            ax.set_ylabel("Confidence Score")
+                            plt.xticks(rotation=45)
+                            plt.tight_layout()
+                            st.pyplot(fig)
 
                         # Download buttons
                         col1, col2 = st.columns(2)
@@ -650,40 +706,74 @@ with tab2:
                     with c2:
                         st.subheader("📊 Precision, Recall, F1-Score")
                         st.caption("This chart displays the performance of a classification model across three key metrics")
-                        st.bar_chart(report_df[['precision', 'recall', 'f1-score']].drop('accuracy', errors="ignore"))
+                        if PLOTLY_AVAILABLE:
+                            st.bar_chart(report_df[['precision', 'recall', 'f1-score']].drop('accuracy', errors="ignore"))
+                        else:
+                            # Fallback to matplotlib
+                            metrics_df = report_df[['precision', 'recall', 'f1-score']].drop('accuracy', errors="ignore")
+                            fig = metrics_df.plot(kind='bar', figsize=(8, 5))
+                            plt.title("Precision, Recall, F1-Score")
+                            plt.xticks(rotation=45)
+                            plt.tight_layout()
+                            st.pyplot(fig)
                     
                     st.subheader("📉 Confusion Matrix")
                     st.caption("The confusion matrix displays the predicted results of a classification model compared to the actual labels. This matrix helps identify the strengths and weaknesses of the model in predicting classes.")
-                    fig = px.imshow(cm, 
-                                  labels=dict(x="Predicted", y="Actual"),
-                                  x=['Negative', 'Positive'],
-                                  y=['Negative', 'Positive'],
-                                  title="Confusion Matrix")
-                    st.plotly_chart(fig)
+                    if PLOTLY_AVAILABLE:
+                        fig = px.imshow(cm, 
+                                      labels=dict(x="Predicted", y="Actual"),
+                                      x=['Negative', 'Positive'],
+                                      y=['Negative', 'Positive'],
+                                      title="Confusion Matrix")
+                        st.plotly_chart(fig)
+                    else:
+                        # Fallback to matplotlib
+                        fig, ax = plt.subplots(figsize=(8, 6))
+                        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                                   xticklabels=['Negative', 'Positive'],
+                                   yticklabels=['Negative', 'Positive'], ax=ax)
+                        ax.set_title("Confusion Matrix")
+                        ax.set_xlabel("Predicted")
+                        ax.set_ylabel("Actual")
+                        st.pyplot(fig)
                     
                     # ROC Curve
                     if roc_data:
                         st.subheader("📈 ROC Curve")
                         st.caption("The ROC curve shows the trade-off between the true positive rate and false positive rate.")
-                        fig = go.Figure()
-                        fig.add_trace(go.Scatter(
-                            x=roc_data[0], y=roc_data[1],
-                            mode='lines',
-                            name=f'ROC Curve (AUC = {roc_data[2]:.2f})',
-                            line=dict(color='darkorange', width=2)
-                        ))
-                        fig.add_trace(go.Scatter(
-                            x=[0, 1], y=[0, 1],
-                            mode='lines',
-                            name='Random Classifier',
-                            line=dict(color='navy', width=2, dash='dash')
-                        ))
-                        fig.update_layout(
-                            xaxis_title='False Positive Rate',
-                            yaxis_title='True Positive Rate',
-                            title='Receiver Operating Characteristic (ROC) Curve'
-                        )
-                        st.plotly_chart(fig)
+                        if PLOTLY_AVAILABLE:
+                            fig = go.Figure()
+                            fig.add_trace(go.Scatter(
+                                x=roc_data[0], y=roc_data[1],
+                                mode='lines',
+                                name=f'ROC Curve (AUC = {roc_data[2]:.2f})',
+                                line=dict(color='darkorange', width=2)
+                            ))
+                            fig.add_trace(go.Scatter(
+                                x=[0, 1], y=[0, 1],
+                                mode='lines',
+                                name='Random Classifier',
+                                line=dict(color='navy', width=2, dash='dash')
+                            ))
+                            fig.update_layout(
+                                xaxis_title='False Positive Rate',
+                                yaxis_title='True Positive Rate',
+                                title='Receiver Operating Characteristic (ROC) Curve'
+                            )
+                            st.plotly_chart(fig)
+                        else:
+                            # Fallback to matplotlib
+                            fig, ax = plt.subplots(figsize=(8, 6))
+                            ax.plot(roc_data[0], roc_data[1], color='darkorange', lw=2,
+                                   label=f'ROC curve (area = {roc_data[2]:.2f})')
+                            ax.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+                            ax.set_xlim([0.0, 1.0])
+                            ax.set_ylim([0.0, 1.05])
+                            ax.set_xlabel('False Positive Rate')
+                            ax.set_ylabel('True Positive Rate')
+                            ax.set_title('Receiver Operating Characteristic (ROC) Curve')
+                            ax.legend(loc="lower right")
+                            st.pyplot(fig)
 
                 with st.expander("🔍 Important Features"):
                     if important_features:
@@ -696,16 +786,28 @@ with tab2:
                             st.dataframe(features_df, hide_index=True)
                             
                             # Plot top features
-                            fig = px.bar(
-                                features_df.head(10), 
-                                x='Importance', 
-                                y='Word',
-                                orientation='h',
-                                title=f"Top 10 Important Features for {sentiment.capitalize()} Class",
-                                color_discrete_sequence=['green' if sentiment == 'positive' else 'red']
-                            )
-                            fig.update_yaxes(categoryorder='total ascending')
-                            st.plotly_chart(fig, use_container_width=True)
+                            if PLOTLY_AVAILABLE:
+                                fig = px.bar(
+                                    features_df.head(10), 
+                                    x='Importance', 
+                                    y='Word',
+                                    orientation='h',
+                                    title=f"Top 10 Important Features for {sentiment.capitalize()} Class",
+                                    color_discrete_sequence=['green' if sentiment == 'positive' else 'red']
+                                )
+                                fig.update_yaxes(categoryorder='total ascending')
+                                st.plotly_chart(fig, use_container_width=True)
+                            else:
+                                # Fallback to matplotlib
+                                fig, ax = plt.subplots(figsize=(10, 6))
+                                top_features = features_df.head(10)
+                                color = 'green' if sentiment == 'positive' else 'red'
+                                ax.barh(top_features['Word'], top_features['Importance'], color=color)
+                                ax.set_title(f"Top 10 Important Features for {sentiment.capitalize()} Class")
+                                ax.set_xlabel("Importance")
+                                ax.invert_yaxis()
+                                plt.tight_layout()
+                                st.pyplot(fig)
 
         with st.container():
             st.header("🔍 Data Insights")
@@ -717,11 +819,20 @@ with tab2:
             
             with col1:
                 st.subheader("📏 Review Length Distribution")
-                fig_length = px.histogram(data, x='review_length',
-                                            nbins=50, title="Distribution of Review Text Length",
-                                            labels={"review_length" : "Text Length (Words)"},
-                                            color_discrete_sequence=["blue"])
-                st.plotly_chart(fig_length)
+                if PLOTLY_AVAILABLE:
+                    fig_length = px.histogram(data, x='review_length',
+                                                nbins=50, title="Distribution of Review Text Length",
+                                                labels={"review_length" : "Text Length (Words)"},
+                                                color_discrete_sequence=["blue"])
+                    st.plotly_chart(fig_length)
+                else:
+                    # Fallback to matplotlib
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    ax.hist(data['review_length'], bins=50, color='blue', alpha=0.7)
+                    ax.set_title("Distribution of Review Text Length")
+                    ax.set_xlabel("Text Length (Words)")
+                    ax.set_ylabel("Frequency")
+                    st.pyplot(fig)
     
             with col2:
                 st.caption("Overview of the review length in dataset, including key statistics such as count, mean, and distribution of numerical values.")
@@ -729,16 +840,40 @@ with tab2:
         
             with col3:
                 sentiment_counts = data['sentiment'].value_counts()
-                fig_sentiment = px.bar(sentiment_counts, x=sentiment_counts.index, y=sentiment_counts.values,
-                                labels={'x': 'Sentiment', 'y': 'Count'},
-                                title='Sentiment Distribution', color=sentiment_counts.index,
-                                color_discrete_sequence=['green', 'red'])
-                st.plotly_chart(fig_sentiment)
+                if PLOTLY_AVAILABLE:
+                    fig_sentiment = px.bar(sentiment_counts, x=sentiment_counts.index, y=sentiment_counts.values,
+                                    labels={'x': 'Sentiment', 'y': 'Count'},
+                                    title='Sentiment Distribution', color=sentiment_counts.index,
+                                    color_discrete_sequence=['green', 'red'])
+                    st.plotly_chart(fig_sentiment)
+                else:
+                    # Fallback to matplotlib
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    colors = ['green', 'red']
+                    ax.bar(sentiment_counts.index, sentiment_counts.values, color=colors)
+                    ax.set_title('Sentiment Distribution')
+                    ax.set_xlabel('Sentiment')
+                    ax.set_ylabel('Count')
+                    st.pyplot(fig)
     
             with col4:
-                fig_boxplt = px.box(data, x='sentiment', y='review_length', color="sentiment",
-                            color_discrete_sequence=["green", "red"])
-                st.plotly_chart(fig_boxplt)
+                if PLOTLY_AVAILABLE:
+                    fig_boxplt = px.box(data, x='sentiment', y='review_length', color="sentiment",
+                                color_discrete_sequence=["green", "red"])
+                    st.plotly_chart(fig_boxplt)
+                else:
+                    # Fallback to matplotlib
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    sentiments = data['sentiment'].unique()
+                    for i, sentiment in enumerate(sentiments):
+                        subset = data[data['sentiment'] == sentiment]
+                        color = 'green' if sentiment == 'positive' else 'red'
+                        ax.boxplot(subset['review_length'], positions=[i], labels=[sentiment], 
+                                  patch_artist=True, boxprops=dict(facecolor=color, alpha=0.7))
+                    ax.set_title('Review Length by Sentiment')
+                    ax.set_xlabel('Sentiment')
+                    ax.set_ylabel('Review Length')
+                    st.pyplot(fig)
 
             with col5:
                 st.subheader("📌 Top 20 Most Frequent Words")
@@ -746,13 +881,23 @@ with tab2:
                 common_words = Counter(all_words).most_common(20)
                 words, counts = zip(*common_words)
 
-                fig_words = px.bar(x=counts, y=words, orientation='h', 
-                            title="Top 20 Most Frequent Words",
-                            labels={'x': 'Frequency', 'y': 'Words'},
-                            color_discrete_sequence=['blue'])
-                fig_words.update_yaxes(categoryorder='total ascending')
-        
-                st.plotly_chart(fig_words)
+                if PLOTLY_AVAILABLE:
+                    fig_words = px.bar(x=counts, y=words, orientation='h', 
+                                title="Top 20 Most Frequent Words",
+                                labels={'x': 'Frequency', 'y': 'Words'},
+                                color_discrete_sequence=['blue'])
+                    fig_words.update_yaxes(categoryorder='total ascending')
+                    st.plotly_chart(fig_words)
+                else:
+                    # Fallback to matplotlib
+                    fig, ax = plt.subplots(figsize=(10, 8))
+                    ax.barh(words, counts, color='blue')
+                    ax.set_title("Top 20 Most Frequent Words")
+                    ax.set_xlabel("Frequency")
+                    ax.set_ylabel("Words")
+                    ax.invert_yaxis()
+                    plt.tight_layout()
+                    st.pyplot(fig)
 
         
             with col6:
@@ -767,15 +912,28 @@ with tab2:
     
                 bigram_freq = Counter(all_bigrams)
                 top_10_bigrams = bigram_freq.most_common(10)
-                fig_bigrams = px.bar(top_10_bigrams, y=[str(bigram[0]) for bigram in top_10_bigrams], 
-                                x=[bigram[1] for bigram in top_10_bigrams], orientation='h',
-                                title="Top 10 Most Frequent Bigrams",
-                                labels={"x" : "Frequency",
-                                     "y" : "Bigrams"},
-                                color_discrete_sequence=["blue"])
-                fig_bigrams.update_yaxes(categoryorder='total ascending')
-    
-                st.plotly_chart(fig_bigrams)
+                
+                if PLOTLY_AVAILABLE:
+                    fig_bigrams = px.bar(top_10_bigrams, y=[str(bigram[0]) for bigram in top_10_bigrams], 
+                                    x=[bigram[1] for bigram in top_10_bigrams], orientation='h',
+                                    title="Top 10 Most Frequent Bigrams",
+                                    labels={"x" : "Frequency",
+                                         "y" : "Bigrams"},
+                                    color_discrete_sequence=["blue"])
+                    fig_bigrams.update_yaxes(categoryorder='total ascending')
+                    st.plotly_chart(fig_bigrams)
+                else:
+                    # Fallback to matplotlib
+                    fig, ax = plt.subplots(figsize=(10, 8))
+                    bigram_labels = [str(bigram[0]) for bigram in top_10_bigrams]
+                    bigram_counts = [bigram[1] for bigram in top_10_bigrams]
+                    ax.barh(bigram_labels, bigram_counts, color='blue')
+                    ax.set_title("Top 10 Most Frequent Bigrams")
+                    ax.set_xlabel("Frequency")
+                    ax.set_ylabel("Bigrams")
+                    ax.invert_yaxis()
+                    plt.tight_layout()
+                    st.pyplot(fig)
             
             with col8:
                 bigram_freq_df = pd.DataFrame(top_10_bigrams, columns=["Bigram", "Frequency"])
@@ -818,45 +976,84 @@ with tab3:
         st.dataframe(comparison_df, use_container_width=True)
         
         # Visualize comparison
-        fig = px.bar(comparison_df, x='Model', y='Accuracy', color='Vectorizer',
-                     barmode='group', title="Model Accuracy Comparison")
-        st.plotly_chart(fig, use_container_width=True)
-        
-        fig = px.bar(comparison_df, x='Model', y='F1-Score', color='Vectorizer',
-                     barmode='group', title="Model F1-Score Comparison")
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Radar chart for comprehensive comparison
-        fig = go.Figure()
-        
-        for model in comparison_df['Model'].unique():
-            model_data = comparison_df[comparison_df['Model'] == model]
-            if len(model_data) > 1:  # If model has both vectorizers
-                for _, row in model_data.iterrows():
+        if PLOTLY_AVAILABLE:
+            fig = px.bar(comparison_df, x='Model', y='Accuracy', color='Vectorizer',
+                         barmode='group', title="Model Accuracy Comparison")
+            st.plotly_chart(fig, use_container_width=True)
+            
+            fig = px.bar(comparison_df, x='Model', y='F1-Score', color='Vectorizer',
+                         barmode='group', title="Model F1-Score Comparison")
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Radar chart for comprehensive comparison
+            fig = go.Figure()
+            
+            for model in comparison_df['Model'].unique():
+                model_data = comparison_df[comparison_df['Model'] == model]
+                if len(model_data) > 1:  # If model has both vectorizers
+                    for _, row in model_data.iterrows():
+                        fig.add_trace(go.Scatterpolar(
+                            r=[row['Accuracy'], row['Precision'], row['Recall'], row['F1-Score']],
+                            theta=['Accuracy', 'Precision', 'Recall', 'F1-Score'],
+                            fill='toself',
+                            name=f"{model} ({row['Vectorizer']})"
+                        ))
+                else:  # If model has only one vectorizer
+                    row = model_data.iloc[0]
                     fig.add_trace(go.Scatterpolar(
                         r=[row['Accuracy'], row['Precision'], row['Recall'], row['F1-Score']],
                         theta=['Accuracy', 'Precision', 'Recall', 'F1-Score'],
                         fill='toself',
                         name=f"{model} ({row['Vectorizer']})"
                     ))
-            else:  # If model has only one vectorizer
-                row = model_data.iloc[0]
-                fig.add_trace(go.Scatterpolar(
-                    r=[row['Accuracy'], row['Precision'], row['Recall'], row['F1-Score']],
-                    theta=['Accuracy', 'Precision', 'Recall', 'F1-Score'],
-                    fill='toself',
-                    name=f"{model} ({row['Vectorizer']})"
-                ))
-        
-        fig.update_layout(
-            polar=dict(
-                radialaxis=dict(
-                    visible=True,
-                    range=[0, 1]
-                )),
-            title="Model Performance Radar Chart"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            
+            fig.update_layout(
+                polar=dict(
+                    radialaxis=dict(
+                        visible=True,
+                        range=[0, 1]
+                    )),
+                title="Model Performance Radar Chart"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            # Fallback to matplotlib
+            # Accuracy comparison
+            fig, ax = plt.subplots(figsize=(12, 6))
+            models = comparison_df['Model'].unique()
+            vectorizers = comparison_df['Vectorizer'].unique()
+            x = np.arange(len(models))
+            width = 0.35
+            
+            for i, vec in enumerate(vectorizers):
+                values = comparison_df[comparison_df['Vectorizer'] == vec]['Accuracy'].values
+                ax.bar(x + i*width, values, width, label=vec)
+            
+            ax.set_xlabel('Model')
+            ax.set_ylabel('Accuracy')
+            ax.set_title('Model Accuracy Comparison')
+            ax.set_xticks(x + width/2)
+            ax.set_xticklabels(models)
+            ax.legend()
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            st.pyplot(fig)
+            
+            # F1-Score comparison
+            fig, ax = plt.subplots(figsize=(12, 6))
+            for i, vec in enumerate(vectorizers):
+                values = comparison_df[comparison_df['Vectorizer'] == vec]['F1-Score'].values
+                ax.bar(x + i*width, values, width, label=vec)
+            
+            ax.set_xlabel('Model')
+            ax.set_ylabel('F1-Score')
+            ax.set_title('Model F1-Score Comparison')
+            ax.set_xticks(x + width/2)
+            ax.set_xticklabels(models)
+            ax.legend()
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            st.pyplot(fig)
         
         # Download comparison results
         st.download_button(
@@ -872,6 +1069,6 @@ with tab3:
 st.markdown("---")
 st.markdown("""
     <div style='text-align: center'>
-        <p>Built with ❤️ using Streamlit, Scikit-learn, and Plotly</p>
+        <p>Built with ❤️ using Streamlit, Scikit-learn, and Matplotlib</p>
     </div>
     """, unsafe_allow_html=True)
