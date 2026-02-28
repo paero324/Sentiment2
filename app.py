@@ -1,32 +1,15 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-from wordcloud import WordCloud
-from collections import Counter
-import nltk
-from nltk.tokenize import RegexpTokenizer
-from nltk.corpus import stopwords
-from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
-from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.linear_model import LogisticRegression
-from sklearn.svm import SVC
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, roc_curve, auc
-import re
-import emoji
-import time
 import io
-from openpyxl import Workbook
-from openpyxl.drawing.image import Image
-from openpyxl.chart import BarChart, Reference
-import tempfile
-from PIL import Image as PILImage
 import base64
 from datetime import datetime
+import re
+import string
+from collections import Counter
+from wordcloud import WordCloud
+import warnings
+warnings.filterwarnings('ignore')
 
 # Try to import plotly with error handling
 try:
